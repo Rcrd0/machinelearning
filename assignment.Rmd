@@ -77,7 +77,7 @@ Note that the seed is set to allow reproductibility of the results.
 
 # 3 Model selection
 
-# 3.1 Base model - Classification Trees with Principal Components
+# 3.1 Classification Trees with Principal Components
 
 This approach is the less computationally expensive but leads to a poor 
 in-sample accuracy (roughly 35%). 
@@ -102,7 +102,7 @@ qplot(trn.D$PC1, trn.D$PC2, col=trn.C$classe)
 
 
 
-## 3.2 Classification Trees with all variables
+## 3.2 Classification Trees with all regressors
 
 In order to improve the poor results obtained in the previos section, the next
 step is applying the classification trees without restricting the variables to 
@@ -133,9 +133,9 @@ fancyRpartPlot(fit2$finalModel, sub = "Base model: rpart with no cross-validatio
 
 
 
-## 3.3 Improving using random forests
+## 3.3 Random Forests
 
-The random forest approach was by far the one that took more processing time 
+The random forests approach was by far the one that took more processing time 
 to train the model. When trying to apply it to all the variables, the process
 took all the memory and made Rstudio crash. 
 
@@ -172,8 +172,13 @@ By applying the model chosen to the 20 test cases we obtain the following result
 ```{r cache=TRUE, message=FALSE}
 val.A <- read.csv("pml-testing.csv")
 answers <- predict(fit3, newdata=val.A[, -problematic])
-print answers
+print(answers)
 ```
 
 
-When submitting the results to Coursera 100% of the values were predicted correctly.
+<div style="color:darkgreen; font-size:150%;">When submitting the results to  Coursera 100% of the 
+values were predicted correctly!!! </div>
+<br>
+<br>
+
+
