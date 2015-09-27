@@ -1,0 +1,179 @@
+---
+title: "Machine Learning Project"
+author: "R. Panero"
+date: "Friday, September 26, 2015"
+output: html_document
+---
+
+# Introduction
+
+The goal of this document is describing the model that was built to predict the 
+class of error made while performing weight lifting from a set of variables 
+collected from body-sensors.
+
+The original dataset can be located at 
+<a href="http://groupware.les.inf.puc-rio.br/har">Groupware@les</a>
+see
+<a href="http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv">Download the WLE dataset"</a>
+
+# 1 Data preprocessing
+
+```{r cache=TRUE, message=FALSE}
+library(caret)
+trn.A <- read.csv("pml-training.csv")
+totalRegressors <- length(names(trn.A)) - 1
+
+mostNAs <- which(mapply(function(X) (sum(is.na(X))/length(X))>.95, trn.A))
+mostBlanks <- which(mapply(function(X) (sum(X == "") /length(X))>.95, trn.A))
+mostZeroVar <- nearZeroVar(trn.A)  # , saveMetrics=T)
+problematic <- union(c(1, 2, 3, 4, 5, mostZeroVar), union(mostNAs, mostBlanks))
+trn.B <- trn.A[, -problematic]
+```
+
+
+From the `r totalRegressors` in the dataset, there are some regressors that could 
+be potentially problematic for the prediction:
+
+1. The first column contains the sequence in which the exercises were made; even though
+there could be a strong correlation with the output, this variable could misslead
+the prediction when the exercises are peformed in a different sequence
+2. The second column contains the name of the person performing the exercise; though the
+names could be converted into dummy variables, this could potentially lead to 
+overfit and the resulting model could not be applied to other users but the ones
+in the training set
+3.  Columns 3, 4 and 5 contain timestamps which have a similar problem than the 
+sequence in column (1)
+4. There are `r length(mostNAs)` regressors which contain mostly NA's. Imputations
+were discarded given that more than 95% of the values in a given column are NA's
+5. There are `r length(mostBlanks)` regressors which contain mostly blanks; imputations
+for those columns are discarded for the same reason than (4)
+6. On top of the cases (4) and (5) above, an additional regressor (new_window) has 
+near zero variability, though all its values are numeric.
+
+All those regressors are removed both from the training and the testing 
+sets, leaving a total of `r totalRegressors - length(mostNAs) - length(mostBlanks) - 5` 
+regressors to make the predicitons.
+
+
+
+# 2 Data slicing and cross validation
+
+```{r cache=TRUE, message=FALSE}
+set.seed(1234)
+inTrain <- createDataPartition(y = trn.A$classe, p=0.75, list=F)
+trn.C <- trn.B[ inTrain,]
+tst.C <- trn.B[-inTrain,]
+```
+
+The training dataset is split into two separate subsets:
+
+- trn.*: contains 75% of the data and is used for picking variables anad model 
+in-sample accuracy
+- tst.*: contains the remaining 25% of the data and is used for testing once the
+best model has been selected to estimate the out-of-sample accuracy
+
+Note that the seed is set to allow reproductibility of the results.
+
+
+# 3 Model selection
+
+# 3.1 Base model - Classification Trees with Principal Components
+
+This approach is the less computationally expensive but leads to a poor 
+in-sample accuracy (roughly 35%). 
+
+```{r cache=TRUE, message=FALSE}
+preProc <- preProcess(trn.C[ ,-54], method = "pca", pcaComp = 2)
+trn.D <- predict(preProc, trn.C[, -54])
+fit1 <- train(trn.C$classe ~ ., method="rpart", data=trn.D)
+pred1 <- predict(fit1, newdata=trn.D)
+right1 <- trn.C$classe == pred1
+confusionMatrix(trn.C$classe, pred1)
+```
+
+The poor performance of this model can be observed in the figure below:
+in spite of the five clearly defined clusters, most of the clusters contain
+all the 5 classe catagories:
+
+```{r cache=TRUE, message=FALSE}
+library(ggplot2)
+qplot(trn.D$PC1, trn.D$PC2, col=trn.C$classe)
+```
+
+
+
+## 3.2 Classification Trees with all variables
+
+In order to improve the poor results obtained in the previos section, the next
+step is applying the classification trees without restricting the variables to 
+the principal components.
+
+```{r cache=TRUE, message=FALSE}
+fit2 <- train(classe ~ ., method="rpart", data=trn.C)
+pred2 <- predict(fit2, newdata=trn.C)
+right2 <- trn.C$classe == pred2
+```
+
+The advantage of this approach is that the resulting model is easy to understand. 
+But though the in-sample accuracy has improved to around 50%, this is still 
+pretty low since is almost the same result of flipping a coin; 
+
+```{r cache=TRUE, message=FALSE}
+print(fit2$finalModel)
+(confusionMatrix(trn.C$classe, pred2)$overall)["Accuracy"]
+```
+
+
+Moreover, the D category is never predicted by the tree:
+
+```{r cache=TRUE, message=FALSE}
+library(rattle)
+fancyRpartPlot(fit2$finalModel, sub = "Base model: rpart with no cross-validation")    
+```
+
+
+
+## 3.3 Improving using random forests
+
+The random forest approach was by far the one that took more processing time 
+to train the model. When trying to apply it to all the variables, the process
+took all the memory and made Rstudio crash. 
+
+To avoid this problem, a control function is definied to limit the number of 
+folds to 2 and the number of repetitions to 1; with this change the error rate
+is reduced to less than 1%
+
+```{r cache=TRUE, message=FALSE}
+# fit3 <- train(classe ~ ., method="rf", data=trn.C, prox=TRUE) - never ends
+cvCtrl <- trainControl(method = "repeatedcv",number = 2, repeats = 1)
+fit3 <- train(trn.C$classe ~ ., data = trn.C, trControl = cvCtrl, method = "rf")
+print(fit3$finalModel)
+```
+
+
+# 4 Model testing
+From the 3 models evaluated, the one selected is random forests given its highetst
+in-sample accuracy. 
+
+Once this model has been selected, the out-of-sample accuracy can be estimated
+by applying the model to the testing subset. Note that the 95% confidence 
+interval for the accuracy is above 99%.
+
+```{r cache=TRUE, message=FALSE}
+pred3b <- predict(fit3, newdata=tst.C)
+right3b <- tst.C$classe == pred3b
+confusionMatrix(tst.C$classe, pred3b)
+table(pred3b, tst.C$classe)
+```
+
+# 5 Model validation
+
+By applying the model chosen to the 20 test cases we obtain the following results:
+```{r cache=TRUE, message=FALSE}
+val.A <- read.csv("pml-testing.csv")
+answers <- predict(fit3, newdata=val.A[, -problematic])
+print answers
+```
+
+
+When submitting the results to Coursera 100% of the values were predicted correctly.
